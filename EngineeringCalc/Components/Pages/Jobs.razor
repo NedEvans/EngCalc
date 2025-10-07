@@ -1,0 +1,222 @@
+@page "/projects/{ProjectId:int}/jobs"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Jobs - @project?.ProjectName</PageTitle>
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/projects">Projects</a></li>
+        <li class="breadcrumb-item active">@project?.ProjectName</li>
+    </ol>
+</nav>
+
+<h1>Jobs - @project?.ProjectName</h1>
+
+<button class="btn btn-primary mb-3" @onclick="ShowCreateDialog">
+    <i class="bi bi-plus-circle"></i> New Job
+</button>
+
+@if (jobs == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!jobs.Any())
+{
+    <div class="alert alert-info">
+        No jobs found. Click "New Job" to create one.
+    </div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Job Name</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var job in jobs)
+            {
+                <tr>
+                    <td>@job.JobName</td>
+                    <td>@job.Description</td>
+                    <td>
+                        <span class="badge bg-@(job.Status == "Active" ? "success" : "secondary")">
+                            @job.Status
+                        </span>
+                    </td>
+                    <td>@job.CreatedDate.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <button class="btn btn-sm btn-info" @onclick="() => ViewCalculations(job.JobId)">
+                            <i class="bi bi-calculator"></i> Calculations
+                        </button>
+                        <button class="btn btn-sm btn-secondary" @onclick="() => ViewGlobalVariables(job.JobId)">
+                            <i class="bi bi-list"></i> Variables
+                        </button>
+                        <button class="btn btn-sm btn-warning" @onclick="() => ShowEditDialog(job)">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteJob(job.JobId)">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (showDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingJob?.JobId > 0 ? "Edit Job" : "New Job")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Job Name *</label>
+                        <input type="text" class="form-control" @bind="editingJob.JobName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="3" @bind="editingJob.Description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" @bind="editingJob.Status">
+                            <option value="Active">Active</option>
+                            <option value="Completed">Completed</option>
+                            <option value="On Hold">On Hold</option>
+                            <option value="Archived">Archived</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveJob">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public int ProjectId { get; set; }
+
+    private Project? project;
+    private List<Job>? jobs;
+    private bool showDialog = false;
+    private Job editingJob = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProject();
+        await LoadJobs();
+    }
+
+    private async Task LoadProject()
+    {
+        project = await DbContext.Projects.FindAsync(ProjectId);
+    }
+
+    private async Task LoadJobs()
+    {
+        jobs = await DbContext.Jobs
+            .Where(j => j.ProjectId == ProjectId)
+            .OrderByDescending(j => j.CreatedDate)
+            .ToListAsync();
+    }
+
+    private void ShowCreateDialog()
+    {
+        editingJob = new Job
+        {
+            ProjectId = ProjectId,
+            Status = "Active"
+        };
+        showDialog = true;
+    }
+
+    private void ShowEditDialog(Job job)
+    {
+        editingJob = new Job
+        {
+            JobId = job.JobId,
+            ProjectId = job.ProjectId,
+            JobName = job.JobName,
+            Description = job.Description,
+            Status = job.Status,
+            CreatedDate = job.CreatedDate
+        };
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        editingJob = new();
+    }
+
+    private async Task SaveJob()
+    {
+        if (string.IsNullOrWhiteSpace(editingJob.JobName))
+        {
+            return;
+        }
+
+        if (editingJob.JobId > 0)
+        {
+            var existing = await DbContext.Jobs.FindAsync(editingJob.JobId);
+            if (existing != null)
+            {
+                existing.JobName = editingJob.JobName;
+                existing.Description = editingJob.Description;
+                existing.Status = editingJob.Status;
+                existing.LastModifiedDate = DateTime.UtcNow;
+            }
+        }
+        else
+        {
+            DbContext.Jobs.Add(editingJob);
+        }
+
+        await DbContext.SaveChangesAsync();
+        await LoadJobs();
+        CloseDialog();
+    }
+
+    private async Task DeleteJob(int jobId)
+    {
+        var job = await DbContext.Jobs.FindAsync(jobId);
+        if (job != null)
+        {
+            DbContext.Jobs.Remove(job);
+            await DbContext.SaveChangesAsync();
+            await LoadJobs();
+        }
+    }
+
+    private void ViewCalculations(int jobId)
+    {
+        NavigationManager.NavigateTo($"/jobs/{jobId}/calculations");
+    }
+
+    private void ViewGlobalVariables(int jobId)
+    {
+        NavigationManager.NavigateTo($"/jobs/{jobId}/variables");
+    }
+}

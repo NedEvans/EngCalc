@@ -1,0 +1,246 @@
+@page "/jobs/{JobId:int}/calculations"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Calculations - @job?.JobName</PageTitle>
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/projects">Projects</a></li>
+        <li class="breadcrumb-item"><a href="/projects/@job?.ProjectId/jobs">@project?.ProjectName</a></li>
+        <li class="breadcrumb-item active">@job?.JobName</li>
+    </ol>
+</nav>
+
+<h1>Calculations - @job?.JobName</h1>
+
+<button class="btn btn-primary mb-3" @onclick="ShowCreateDialog">
+    <i class="bi bi-plus-circle"></i> New Calculation
+</button>
+
+@if (calculations == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!calculations.Any())
+{
+    <div class="alert alert-info">
+        No calculations found. Click "New Calculation" to create one.
+    </div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Calculation Title</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Revision</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var calc in calculations)
+            {
+                <tr>
+                    <td>@calc.CalculationTitle</td>
+                    <td>@calc.Description</td>
+                    <td>
+                        <span class="badge bg-@GetStatusColor(calc.Status)">
+                            @calc.Status
+                        </span>
+                    </td>
+                    <td>v@calc.CurrentRevisionId</td>
+                    <td>@calc.CreatedDate.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" @onclick="() => ViewCalculation(calc.CalculationId)">
+                            <i class="bi bi-eye"></i> View
+                        </button>
+                        <button class="btn btn-sm btn-warning" @onclick="() => ShowEditDialog(calc)">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteCalculation(calc.CalculationId)">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (showDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingCalculation?.CalculationId > 0 ? "Edit Calculation" : "New Calculation")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Calculation Title *</label>
+                        <input type="text" class="form-control" @bind="editingCalculation.CalculationTitle" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="3" @bind="editingCalculation.Description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" @bind="editingCalculation.Status">
+                            <option value="Draft">Draft</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Under Review">Under Review</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Rejected">Rejected</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveCalculation">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public int JobId { get; set; }
+
+    private Job? job;
+    private Project? project;
+    private List<Calculation>? calculations;
+    private bool showDialog = false;
+    private Calculation editingCalculation = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadJob();
+        await LoadCalculations();
+    }
+
+    private async Task LoadJob()
+    {
+        job = await DbContext.Jobs
+            .Include(j => j.Project)
+            .FirstOrDefaultAsync(j => j.JobId == JobId);
+
+        project = job?.Project;
+    }
+
+    private async Task LoadCalculations()
+    {
+        calculations = await DbContext.Calculations
+            .Where(c => c.JobId == JobId)
+            .OrderByDescending(c => c.CreatedDate)
+            .ToListAsync();
+    }
+
+    private void ShowCreateDialog()
+    {
+        editingCalculation = new Calculation
+        {
+            JobId = JobId,
+            Status = "Draft"
+        };
+        showDialog = true;
+    }
+
+    private void ShowEditDialog(Calculation calculation)
+    {
+        editingCalculation = new Calculation
+        {
+            CalculationId = calculation.CalculationId,
+            JobId = calculation.JobId,
+            CalculationTitle = calculation.CalculationTitle,
+            Description = calculation.Description,
+            Status = calculation.Status,
+            CreatedDate = calculation.CreatedDate
+        };
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        editingCalculation = new();
+    }
+
+    private async Task SaveCalculation()
+    {
+        if (string.IsNullOrWhiteSpace(editingCalculation.CalculationTitle))
+        {
+            return;
+        }
+
+        if (editingCalculation.CalculationId > 0)
+        {
+            var existing = await DbContext.Calculations.FindAsync(editingCalculation.CalculationId);
+            if (existing != null)
+            {
+                existing.CalculationTitle = editingCalculation.CalculationTitle;
+                existing.Description = editingCalculation.Description;
+                existing.Status = editingCalculation.Status;
+                existing.LastModifiedDate = DateTime.UtcNow;
+            }
+        }
+        else
+        {
+            // Create initial revision
+            var revision = new CalculationRevision
+            {
+                CalculationId = 0, // Will be set after calculation is saved
+                RevisionNumber = "Rev1",
+                Comments = "Initial version",
+                CreatedDate = DateTime.UtcNow
+            };
+
+            editingCalculation.Revisions.Add(revision);
+            DbContext.Calculations.Add(editingCalculation);
+        }
+
+        await DbContext.SaveChangesAsync();
+        await LoadCalculations();
+        CloseDialog();
+    }
+
+    private async Task DeleteCalculation(int calculationId)
+    {
+        var calculation = await DbContext.Calculations.FindAsync(calculationId);
+        if (calculation != null)
+        {
+            DbContext.Calculations.Remove(calculation);
+            await DbContext.SaveChangesAsync();
+            await LoadCalculations();
+        }
+    }
+
+    private void ViewCalculation(int calculationId)
+    {
+        NavigationManager.NavigateTo($"/calculations/{calculationId}");
+    }
+
+    private string GetStatusColor(string status)
+    {
+        return status switch
+        {
+            "Draft" => "secondary",
+            "In Progress" => "info",
+            "Under Review" => "warning",
+            "Approved" => "success",
+            "Rejected" => "danger",
+            _ => "secondary"
+        };
+    }
+}
