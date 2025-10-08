@@ -1,5 +1,6 @@
 using EngineeringCalc.Components;
 using EngineeringCalc.Data;
+using EngineeringCalc.Services;
 using Microsoft.EntityFrameworkCore;
 
 // Load environment variables from .env file
@@ -10,6 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Register calculation engine
+builder.Services.AddScoped<CalculationEngine>();
 
 // Configure database context
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -23,6 +27,19 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString));
 
 var app = builder.Build();
+
+// Seed database with sample data and app constants
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    var context = services.GetRequiredService<ApplicationDbContext>();
+
+    // Seed AppConstants first (so SeedData can reference them)
+    await AppConstantSeeder.SeedAppConstants(context);
+
+    // Seed sample card data with AppConstant bindings
+    await SeedData.Initialize(context);
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

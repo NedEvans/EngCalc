@@ -1,0 +1,634 @@
+@page "/card-instances/{InstanceId:int}/edit"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using EngineeringCalc.Services
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject ApplicationDbContext DbContext
+@inject CalculationEngine CalcEngine
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Edit Card Instance</PageTitle>
+
+@if (cardInstance != null && card != null)
+{
+    <h2>@card.CardName</h2>
+    <p class="text-muted">@card.Description</p>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h4>Input Values</h4>
+
+            @if (inputSchema != null)
+            {
+                <div class="mb-3">
+                    @foreach (var variable in inputSchema)
+                    {
+                        var name = variable.GetProperty("name").GetString() ?? "";
+                        var type = variable.GetProperty("type").GetString() ?? "double";
+                        var unit = variable.TryGetProperty("unit", out var u) ? u.GetString() : "";
+                        var desc = variable.TryGetProperty("description", out var d) ? d.GetString() : "";
+
+                        // Check if this variable is bound to a GlobalConstant
+                        var bindingInfo = GetBindingInfo(name);
+
+                        <div class="mb-3 border p-3 rounded @(bindingInfo != null ? "bg-light" : "")">
+                            <label class="form-label fw-bold">
+                                @name
+                                @if (!string.IsNullOrEmpty(unit))
+                                {
+                                    <small class="text-muted">(@unit)</small>
+                                }
+                            </label>
+                            @if (!string.IsNullOrEmpty(desc))
+                            {
+                                <small class="d-block text-muted mb-2">@desc</small>
+                            }
+
+                            @if (bindingInfo != null)
+                            {
+                                <!-- Bound to Global Constant -->
+                                <div class="alert alert-info mb-2 py-2">
+                                    <small>
+                                        <i class="bi bi-link-45deg"></i>
+                                        <strong>Global Constant:</strong> @bindingInfo.ConstantName = @bindingInfo.Value @bindingInfo.Unit
+                                    </small>
+                                </div>
+
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="use_@name"
+                                           checked="@(!overrideStates[name])"
+                                           @onchange="e => ToggleOverride(name, !((bool)e.Value!))" />
+                                    <label class="form-check-label" for="use_@name">
+                                        Use Global Constant
+                                    </label>
+                                </div>
+
+                                @if (overrideStates[name])
+                                {
+                                    <!-- Override enabled - show editable input -->
+                                    <input type="number" step="any" class="form-control"
+                                           @bind="localValues[name]"
+                                           placeholder="Enter override value" />
+                                    <small class="text-warning">
+                                        <i class="bi bi-exclamation-triangle"></i> Using local override instead of global constant
+                                    </small>
+                                }
+                                else
+                                {
+                                    <!-- Using global - show read-only -->
+                                    <input type="number" step="any" class="form-control"
+                                           value="@bindingInfo.Value"
+                                           disabled />
+                                }
+                            }
+                            else
+                            {
+                                <!-- Not bound - regular input -->
+                                <input type="number" step="any" class="form-control"
+                                       @bind="localValues[name]"
+                                       placeholder="Enter @name" />
+                            }
+                        </div>
+                    }
+                </div>
+
+                <button class="btn btn-primary" @onclick="Calculate">
+                    <i class="bi bi-calculator"></i> Calculate
+                </button>
+                <button class="btn btn-success" @onclick="ShowAddConstantDialog">
+                    <i class="bi bi-plus-circle"></i> Add New Constant
+                </button>
+                <button class="btn btn-secondary" @onclick="Cancel">
+                    <i class="bi bi-arrow-left"></i> Back to Calculation
+                </button>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger mt-3">
+                        <strong>Error:</strong> @errorMessage
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="col-md-6">
+            @if (!string.IsNullOrEmpty(card.MathMLFormula))
+            {
+                <h4>Formula</h4>
+                <div class="border p-3 bg-light mb-3">
+                    @((MarkupString)card.MathMLFormula)
+                </div>
+            }
+
+            @if (calculationResult != null)
+            {
+                <h4>Results</h4>
+                <div class="card">
+                    <div class="card-body">
+                        @if (calculationResult.Success)
+                        {
+                            @if (outputSchema != null)
+                            {
+                                @foreach (var variable in outputSchema)
+                                {
+                                    var name = variable.GetProperty("name").GetString() ?? "";
+                                    var unit = variable.TryGetProperty("unit", out var u) ? u.GetString() : "";
+
+                                    if (calculationResult.OutputVariables.TryGetValue(name, out var value))
+                                    {
+                                        <div class="mb-2">
+                                            <strong>@name:</strong> @value
+                                            @if (!string.IsNullOrEmpty(unit))
+                                            {
+                                                <span class="text-muted">@unit</span>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            }
+
+                            @if (cardInstance.DesignLoad.HasValue && cardInstance.CalculatedCapacity.HasValue)
+                            {
+                                <hr />
+                                <div class="mb-2">
+                                    <strong>Design Load:</strong> @cardInstance.DesignLoad.Value.ToString("F2")
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Capacity:</strong> @cardInstance.CalculatedCapacity.Value.ToString("F2")
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Utilization:</strong> @((cardInstance.DesignLoad.Value / cardInstance.CalculatedCapacity.Value * 100).ToString("F1"))%
+                                </div>
+                                <div class="alert alert-@GetCheckResultClass(cardInstance.CheckResult) mt-2">
+                                    <strong>Check Result:</strong> @cardInstance.CheckResult
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="alert alert-danger">
+                                @calculationResult.ErrorMessage
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @if (calculationResult != null)
+                {
+                    <button class="btn btn-secondary mt-3" @onclick="Cancel">
+                        <i class="bi bi-arrow-left"></i> Back to Calculation
+                    </button>
+                }
+            }
+        </div>
+    </div>
+}
+
+@if (showAddConstantDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Global Constant</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAddConstantDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Copy from App Constant (Optional)</label>
+                        <select class="form-select" @onchange="OnAppConstantSelected">
+                            <option value="">-- Create Custom Constant --</option>
+                            @if (availableAppConstants != null)
+                            {
+                                @foreach (var appConstant in availableAppConstants)
+                                {
+                                    <option value="@appConstant.AppConstantId">
+                                        @appConstant.ConstantName (@appConstant.DefaultValue @appConstant.Unit) - @appConstant.Description
+                                    </option>
+                                }
+                            }
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Constant Name *</label>
+                        <input type="text" class="form-control" @bind="newConstant.ConstantName" placeholder="e.g., fy_CustomSteel" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Value *</label>
+                        <input type="text" class="form-control" @bind="newConstant.ConstantValue" placeholder="e.g., 350" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Unit</label>
+                        <input type="text" class="form-control" @bind="newConstant.Unit" placeholder="e.g., MPa" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="2" @bind="newConstant.Description" placeholder="Brief description of this constant"></textarea>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(addConstantError))
+                    {
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> @addConstantError
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAddConstantDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveNewConstant">Save Constant</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public int InstanceId { get; set; }
+
+    private CardInstance? cardInstance;
+    private Card? card;
+    private JsonElement[]? inputSchema;
+    private JsonElement[]? outputSchema;
+    private Dictionary<string, double> localValues = new();
+    private Dictionary<string, int> bindings = new(); // Variable name → GlobalConstantId
+    private Dictionary<string, bool> overrideStates = new(); // Variable name → is overridden?
+    private Dictionary<int, GlobalConstant> globalConstantsById = new(); // Cache of GlobalConstants
+    private CalculationResult? calculationResult;
+    private string? errorMessage;
+
+    // Add New Constant Dialog
+    private bool showAddConstantDialog = false;
+    private List<AppConstant>? availableAppConstants;
+    private GlobalConstant newConstant = new();
+    private string? addConstantError;
+
+    // Helper class to pass binding info to UI
+    private class BindingInfo
+    {
+        public string ConstantName { get; set; } = "";
+        public double Value { get; set; }
+        public string? Unit { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCardInstance();
+    }
+
+    private async Task LoadCardInstance()
+    {
+        cardInstance = await DbContext.CardInstances
+            .Include(ci => ci.Card)
+            .Include(ci => ci.CalculationRevision)
+                .ThenInclude(cr => cr.Calculation)
+                .ThenInclude(c => c.Job)
+                .ThenInclude(j => j.GlobalConstants)
+            .FirstOrDefaultAsync(ci => ci.CardInstanceId == InstanceId);
+
+        if (cardInstance != null)
+        {
+            card = cardInstance.Card;
+
+            // Load global constants from the job into cache
+            var job = cardInstance.CalculationRevision?.Calculation?.Job;
+            if (job?.GlobalConstants != null)
+            {
+                foreach (var constant in job.GlobalConstants)
+                {
+                    globalConstantsById[constant.GlobalConstantId] = constant;
+                }
+            }
+
+            // Parse input/output schemas
+            try
+            {
+                var inputDoc = JsonDocument.Parse(card.InputVariables);
+                inputSchema = inputDoc.RootElement.EnumerateArray().ToArray();
+
+                var outputDoc = JsonDocument.Parse(card.OutputVariables);
+                outputSchema = outputDoc.RootElement.EnumerateArray().ToArray();
+
+                // Initialize localValues with all input variable names
+                foreach (var variable in inputSchema)
+                {
+                    var name = variable.GetProperty("name").GetString();
+                    if (name != null && !localValues.ContainsKey(name))
+                    {
+                        localValues[name] = 0.0; // Default value
+                    }
+                }
+
+                // Load bindings from GlobalConstantBindings JSON
+                if (!string.IsNullOrEmpty(cardInstance.GlobalConstantBindings))
+                {
+                    var loadedBindings = JsonSerializer.Deserialize<Dictionary<string, int>>(cardInstance.GlobalConstantBindings);
+                    if (loadedBindings != null)
+                    {
+                        bindings = loadedBindings;
+                    }
+                }
+
+                // Load override states from GlobalConstantOverrides JSON
+                if (!string.IsNullOrEmpty(cardInstance.GlobalConstantOverrides))
+                {
+                    var loadedOverrides = JsonSerializer.Deserialize<Dictionary<string, bool>>(cardInstance.GlobalConstantOverrides);
+                    if (loadedOverrides != null)
+                    {
+                        overrideStates = loadedOverrides;
+                    }
+                }
+
+                // Initialize override states for bound variables (if not already set)
+                foreach (var binding in bindings)
+                {
+                    if (!overrideStates.ContainsKey(binding.Key))
+                    {
+                        overrideStates[binding.Key] = false; // Default: use global
+                    }
+                }
+
+                // Load existing local values
+                if (!string.IsNullOrEmpty(cardInstance.LocalVariables) && cardInstance.LocalVariables != "{}")
+                {
+                    var existingValues = JsonSerializer.Deserialize<Dictionary<string, double>>(cardInstance.LocalVariables);
+                    if (existingValues != null)
+                    {
+                        foreach (var kvp in existingValues)
+                        {
+                            localValues[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error parsing card schema: {ex.Message}";
+            }
+        }
+    }
+
+    private BindingInfo? GetBindingInfo(string variableName)
+    {
+        if (!bindings.ContainsKey(variableName))
+            return null;
+
+        var globalConstantId = bindings[variableName];
+        if (!globalConstantsById.TryGetValue(globalConstantId, out var constant))
+            return null;
+
+        if (!double.TryParse(constant.ConstantValue, out var value))
+            return null;
+
+        return new BindingInfo
+        {
+            ConstantName = constant.ConstantName,
+            Value = value,
+            Unit = constant.Unit
+        };
+    }
+
+    private void ToggleOverride(string variableName, bool shouldOverride)
+    {
+        overrideStates[variableName] = shouldOverride;
+    }
+
+    private async Task Calculate()
+    {
+        if (card == null || cardInstance == null) return;
+
+        errorMessage = null;
+
+        try
+        {
+            // Build merged inputs based on bindings and override states
+            var mergedInputs = new Dictionary<string, double>();
+
+            // For each input variable, determine the value to use
+            foreach (var variable in inputSchema!)
+            {
+                var name = variable.GetProperty("name").GetString();
+                if (name == null) continue;
+
+                // Check if this variable is bound to a global constant
+                if (bindings.ContainsKey(name))
+                {
+                    // Variable is bound - check if user is overriding
+                    if (overrideStates.ContainsKey(name) && overrideStates[name])
+                    {
+                        // User is overriding - use local value
+                        mergedInputs[name] = localValues[name];
+                    }
+                    else
+                    {
+                        // User is using global constant - get value from binding
+                        var bindingInfo = GetBindingInfo(name);
+                        if (bindingInfo != null)
+                        {
+                            mergedInputs[name] = bindingInfo.Value;
+                        }
+                        else
+                        {
+                            errorMessage = $"Global constant for '{name}' not found or invalid";
+                            return;
+                        }
+                    }
+                }
+                else
+                {
+                    // Variable is not bound - use local value
+                    mergedInputs[name] = localValues[name];
+                }
+            }
+
+            // Convert to object dictionary for engine
+            var inputs = mergedInputs.ToDictionary(k => k.Key, v => (object)v.Value);
+
+            // Execute calculation
+            calculationResult = await CalcEngine.ExecuteCalculation(card.CodeTemplate, inputs);
+
+            if (calculationResult.Success)
+            {
+                // Snapshot the actual input values used for audit trail
+                cardInstance.InputSnapshot = JsonSerializer.Serialize(mergedInputs);
+
+                // Save override states
+                cardInstance.GlobalConstantOverrides = JsonSerializer.Serialize(overrideStates);
+
+                // Save local values (only for unbound variables and overridden variables)
+                cardInstance.LocalVariables = JsonSerializer.Serialize(localValues);
+
+                // Save results
+                cardInstance.CalculatedResults = JsonSerializer.Serialize(calculationResult.OutputVariables);
+                cardInstance.LastCalculated = DateTime.UtcNow;
+
+                // Extract design load and capacity if defined
+                if (!string.IsNullOrEmpty(card.DesignLoadVariable) &&
+                    mergedInputs.TryGetValue(card.DesignLoadVariable, out var designLoad))
+                {
+                    cardInstance.DesignLoad = designLoad;
+                }
+
+                if (!string.IsNullOrEmpty(card.CapacityVariable) &&
+                    calculationResult.OutputVariables.TryGetValue(card.CapacityVariable, out var capacity))
+                {
+                    cardInstance.CalculatedCapacity = Convert.ToDouble(capacity);
+                }
+
+                // Determine pass/fail
+                if (cardInstance.DesignLoad.HasValue && cardInstance.CalculatedCapacity.HasValue)
+                {
+                    var utilization = cardInstance.DesignLoad.Value / cardInstance.CalculatedCapacity.Value;
+
+                    if (utilization <= 1.0)
+                        cardInstance.CheckResult = "Pass";
+                    else if (utilization <= 1.1)
+                        cardInstance.CheckResult = "Warning";
+                    else
+                        cardInstance.CheckResult = "Fail";
+                }
+
+                await DbContext.SaveChangesAsync();
+            }
+            else
+            {
+                errorMessage = calculationResult.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Calculation error: {ex.Message}";
+        }
+    }
+
+    private void Cancel()
+    {
+        NavigationManager.NavigateTo($"/calculations/{cardInstance?.CalculationRevision.CalculationId}");
+    }
+
+    private string GetCheckResultClass(string? result)
+    {
+        return result switch
+        {
+            "Pass" => "success",
+            "Fail" => "danger",
+            "Warning" => "warning",
+            _ => "secondary"
+        };
+    }
+
+    private async Task ShowAddConstantDialog()
+    {
+        // Load available AppConstants that aren't already in this job's GlobalConstants
+        var job = cardInstance?.CalculationRevision?.Calculation?.Job;
+        if (job == null) return;
+
+        var allAppConstants = await DbContext.AppConstants.ToListAsync();
+        var existingAppConstantIds = job.GlobalConstants
+            .Where(gc => gc.AppConstantId.HasValue)
+            .Select(gc => gc.AppConstantId.Value)
+            .ToHashSet();
+
+        availableAppConstants = allAppConstants
+            .Where(ac => !existingAppConstantIds.Contains(ac.AppConstantId))
+            .OrderBy(ac => ac.Standard)
+            .ThenBy(ac => ac.ConstantName)
+            .ToList();
+
+        newConstant = new GlobalConstant
+        {
+            JobId = job.JobId
+        };
+
+        addConstantError = null;
+        showAddConstantDialog = true;
+    }
+
+    private void CloseAddConstantDialog()
+    {
+        showAddConstantDialog = false;
+        availableAppConstants = null;
+        newConstant = new();
+        addConstantError = null;
+    }
+
+    private void OnAppConstantSelected(ChangeEventArgs e)
+    {
+        var selectedId = e.Value?.ToString();
+        if (string.IsNullOrEmpty(selectedId) || !int.TryParse(selectedId, out var appConstantId))
+        {
+            // User selected "Create Custom" - clear the form
+            newConstant.ConstantName = string.Empty;
+            newConstant.ConstantValue = string.Empty;
+            newConstant.Unit = null;
+            newConstant.Description = null;
+            newConstant.AppConstantId = null;
+            return;
+        }
+
+        // User selected an AppConstant - copy its values
+        var appConstant = availableAppConstants?.FirstOrDefault(ac => ac.AppConstantId == appConstantId);
+        if (appConstant != null)
+        {
+            newConstant.AppConstantId = appConstant.AppConstantId;
+            newConstant.ConstantName = appConstant.ConstantName;
+            newConstant.ConstantValue = appConstant.DefaultValue;
+            newConstant.Unit = appConstant.Unit;
+            newConstant.Description = appConstant.Description;
+        }
+    }
+
+    private async Task SaveNewConstant()
+    {
+        addConstantError = null;
+
+        // Validation
+        if (string.IsNullOrWhiteSpace(newConstant.ConstantName))
+        {
+            addConstantError = "Constant name is required";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(newConstant.ConstantValue))
+        {
+            addConstantError = "Value is required";
+            return;
+        }
+
+        // Check if constant name already exists in this job
+        var job = cardInstance?.CalculationRevision?.Calculation?.Job;
+        if (job == null) return;
+
+        var exists = await DbContext.GlobalConstants
+            .AnyAsync(gc => gc.JobId == job.JobId && gc.ConstantName == newConstant.ConstantName);
+
+        if (exists)
+        {
+            addConstantError = $"A constant named '{newConstant.ConstantName}' already exists in this job";
+            return;
+        }
+
+        try
+        {
+            // Save the new constant
+            DbContext.GlobalConstants.Add(newConstant);
+            await DbContext.SaveChangesAsync();
+
+            // Refresh the global constants cache
+            globalConstantsById[newConstant.GlobalConstantId] = newConstant;
+
+            CloseAddConstantDialog();
+        }
+        catch (Exception ex)
+        {
+            addConstantError = $"Error saving constant: {ex.Message}";
+        }
+    }
+}

@@ -4,6 +4,7 @@ using EngineeringCalc.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EngineeringCalc.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251008001040_RenameGlobalVariableToGlobalConstant")]
+    partial class RenameGlobalVariableToGlobalConstant
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,52 +24,6 @@ namespace EngineeringCalc.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("EngineeringCalc.Models.AppConstant", b =>
-                {
-                    b.Property<int>("AppConstantId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("AppConstantId"));
-
-                    b.Property<string>("Category")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("ConstantName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DefaultValue")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("LastModifiedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Standard")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Unit")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.HasKey("AppConstantId");
-
-                    b.HasIndex("ConstantName");
-
-                    b.ToTable("AppConstants");
-                });
 
             modelBuilder.Entity("EngineeringCalc.Models.Calculation", b =>
                 {
@@ -243,15 +200,6 @@ namespace EngineeringCalc.Migrations
                     b.Property<int>("DisplayOrder")
                         .HasColumnType("int");
 
-                    b.Property<string>("GlobalConstantBindings")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("GlobalConstantOverrides")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("InputSnapshot")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<DateTime?>("LastCalculated")
                         .HasColumnType("datetime2");
 
@@ -276,9 +224,6 @@ namespace EngineeringCalc.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("GlobalConstantId"));
 
-                    b.Property<int?>("AppConstantId")
-                        .HasColumnType("int");
-
                     b.Property<string>("ConstantName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -288,9 +233,6 @@ namespace EngineeringCalc.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -298,16 +240,11 @@ namespace EngineeringCalc.Migrations
                     b.Property<int>("JobId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime>("LastModifiedDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<string>("Unit")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
                     b.HasKey("GlobalConstantId");
-
-                    b.HasIndex("AppConstantId");
 
                     b.HasIndex("JobId", "ConstantName");
 
@@ -481,17 +418,11 @@ namespace EngineeringCalc.Migrations
 
             modelBuilder.Entity("EngineeringCalc.Models.GlobalConstant", b =>
                 {
-                    b.HasOne("EngineeringCalc.Models.AppConstant", "AppConstant")
-                        .WithMany("GlobalConstants")
-                        .HasForeignKey("AppConstantId");
-
                     b.HasOne("EngineeringCalc.Models.Job", "Job")
                         .WithMany("GlobalConstants")
                         .HasForeignKey("JobId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("AppConstant");
 
                     b.Navigation("Job");
                 });
@@ -505,11 +436,6 @@ namespace EngineeringCalc.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
-                });
-
-            modelBuilder.Entity("EngineeringCalc.Models.AppConstant", b =>
-                {
-                    b.Navigation("GlobalConstants");
                 });
 
             modelBuilder.Entity("EngineeringCalc.Models.Calculation", b =>

@@ -1,0 +1,223 @@
+@page "/jobs/{JobId:int}/constants"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Global Constants - @job?.JobName</PageTitle>
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/projects">Projects</a></li>
+        <li class="breadcrumb-item"><a href="/projects/@job?.ProjectId/jobs">@project?.ProjectName</a></li>
+        <li class="breadcrumb-item"><a href="/jobs/@JobId/calculations">@job?.JobName</a></li>
+        <li class="breadcrumb-item active">Global Constants</li>
+    </ol>
+</nav>
+
+<h1>Global Constants - @job?.JobName</h1>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Global constants are automatically available to all calculations in this job.
+</div>
+
+<div class="mb-3">
+    <button class="btn btn-secondary me-2" @onclick="NavigateBack">
+        <i class="bi bi-arrow-left"></i> Back to Job
+    </button>
+    <button class="btn btn-primary" @onclick="ShowCreateDialog">
+        <i class="bi bi-plus-circle"></i> New Constant
+    </button>
+</div>
+
+@if (constants == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!constants.Any())
+{
+    <div class="alert alert-warning">
+        No global constants defined. Click "New Constant" to add common values like material properties or safety factors.
+    </div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Constant Name</th>
+                <th>Value</th>
+                <th>Unit</th>
+                <th>Description</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var constant in constants)
+            {
+                <tr>
+                    <td><code>@constant.ConstantName</code></td>
+                    <td class="text-end">@constant.ConstantValue</td>
+                    <td>@constant.Unit</td>
+                    <td>@constant.Description</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" @onclick="() => ShowEditDialog(constant)">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteConstant(constant.GlobalConstantId)">
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (showDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingConstant?.GlobalConstantId > 0 ? "Edit Constant" : "New Constant")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Constant Name * <small class="text-muted">(e.g., fy, Es, phi)</small></label>
+                        <input type="text" class="form-control" @bind="editingConstant.ConstantName" placeholder="fy" />
+                        <small class="text-muted">Use standard engineering notation, no spaces</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Value *</label>
+                        <input type="text" class="form-control" @bind="editingConstant.ConstantValue" placeholder="350" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Unit <small class="text-muted">(e.g., MPa, mm, kN)</small></label>
+                        <input type="text" class="form-control" @bind="editingConstant.Unit" placeholder="MPa" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="2" @bind="editingConstant.Description" placeholder="Steel yield strength (AS4100)"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveConstant">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public int JobId { get; set; }
+
+    private Job? job;
+    private Project? project;
+    private List<GlobalConstant>? constants;
+    private bool showDialog = false;
+    private GlobalConstant editingConstant = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadJob();
+        await LoadConstants();
+    }
+
+    private async Task LoadJob()
+    {
+        job = await DbContext.Jobs
+            .Include(j => j.Project)
+            .FirstOrDefaultAsync(j => j.JobId == JobId);
+
+        project = job?.Project;
+    }
+
+    private async Task LoadConstants()
+    {
+        constants = await DbContext.GlobalConstants
+            .Where(c => c.JobId == JobId)
+            .OrderBy(c => c.ConstantName)
+            .ToListAsync();
+    }
+
+    private void ShowCreateDialog()
+    {
+        editingConstant = new GlobalConstant
+        {
+            JobId = JobId
+        };
+        showDialog = true;
+    }
+
+    private void ShowEditDialog(GlobalConstant constant)
+    {
+        editingConstant = new GlobalConstant
+        {
+            GlobalConstantId = constant.GlobalConstantId,
+            JobId = constant.JobId,
+            ConstantName = constant.ConstantName,
+            ConstantValue = constant.ConstantValue,
+            Unit = constant.Unit,
+            Description = constant.Description
+        };
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        editingConstant = new();
+    }
+
+    private async Task SaveConstant()
+    {
+        if (string.IsNullOrWhiteSpace(editingConstant.ConstantName) ||
+            string.IsNullOrWhiteSpace(editingConstant.ConstantValue))
+        {
+            return;
+        }
+
+        if (editingConstant.GlobalConstantId > 0)
+        {
+            var existing = await DbContext.GlobalConstants.FindAsync(editingConstant.GlobalConstantId);
+            if (existing != null)
+            {
+                existing.ConstantName = editingConstant.ConstantName;
+                existing.ConstantValue = editingConstant.ConstantValue;
+                existing.Unit = editingConstant.Unit;
+                existing.Description = editingConstant.Description;
+            }
+        }
+        else
+        {
+            DbContext.GlobalConstants.Add(editingConstant);
+        }
+
+        await DbContext.SaveChangesAsync();
+        await LoadConstants();
+        CloseDialog();
+    }
+
+    private async Task DeleteConstant(int constantId)
+    {
+        var constant = await DbContext.GlobalConstants.FindAsync(constantId);
+        if (constant != null)
+        {
+            DbContext.GlobalConstants.Remove(constant);
+            await DbContext.SaveChangesAsync();
+            await LoadConstants();
+        }
+    }
+
+    private void NavigateBack()
+    {
+        NavigationManager.NavigateTo($"/jobs/{JobId}/calculations");
+    }
+}

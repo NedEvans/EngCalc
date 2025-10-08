@@ -1,0 +1,15 @@
+@* MathML Display Component *@
+@if (!string.IsNullOrEmpty(Formula))
+{
+    <div class="mathml-container">
+        @((MarkupString)Formula)
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Formula { get; set; }
+
+    [Parameter]
+    public string? CssClass { get; set; }
+}

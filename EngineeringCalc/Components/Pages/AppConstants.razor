@@ -1,0 +1,329 @@
+@page "/app-constants"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>App Constants</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>App Constants</h1>
+    <button class="btn btn-primary" @onclick="ShowCreateDialog">
+        <i class="bi bi-plus-circle"></i> New Constant
+    </button>
+</div>
+
+<p class="text-muted">
+    Application-level constants are copied to each new job's global constants.
+    These serve as templates for commonly used engineering values.
+</p>
+
+@if (appConstants == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!appConstants.Any())
+{
+    <div class="alert alert-info">
+        No app constants found. Click "New Constant" to create one.
+    </div>
+}
+else
+{
+    <!-- Search and Filter -->
+    <div class="row mb-3">
+        <div class="col-md-4">
+            <input type="text" class="form-control" placeholder="Search constants..."
+                   @bind="searchTerm" @bind:event="oninput" />
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" @bind="filterStandard">
+                <option value="">All Standards</option>
+                @foreach (var standard in appConstants.Select(c => c.Standard).Distinct().Where(s => !string.IsNullOrEmpty(s)))
+                {
+                    <option value="@standard">@standard</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" @bind="filterCategory">
+                <option value="">All Categories</option>
+                @foreach (var category in appConstants.Select(c => c.Category).Distinct().Where(c => !string.IsNullOrEmpty(c)))
+                {
+                    <option value="@category">@category</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <!-- Constants Table Grouped by Standard -->
+    @foreach (var standardGroup in GetFilteredConstants().GroupBy(c => c.Standard ?? "Other").OrderBy(g => g.Key))
+    {
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">@standardGroup.Key</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-striped mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                            <th>Unit</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var constant in standardGroup.OrderBy(c => c.Category).ThenBy(c => c.ConstantName))
+                        {
+                            <tr>
+                                <td><code>@constant.ConstantName</code></td>
+                                <td><strong>@constant.DefaultValue</strong></td>
+                                <td>@constant.Unit</td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(constant.Category))
+                                    {
+                                        <span class="badge bg-secondary">@constant.Category</span>
+                                    }
+                                </td>
+                                <td>
+                                    <small class="text-muted">@constant.Description</small>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-warning" @onclick="() => ShowEditDialog(constant)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger" @onclick="() => DeleteConstant(constant.AppConstantId)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@if (showDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingConstant?.AppConstantId > 0 ? "Edit App Constant" : "New App Constant")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Constant Name *</label>
+                        <input type="text" class="form-control" @bind="editingConstant.ConstantName"
+                               placeholder="e.g., fy_Grade300" />
+                        <small class="text-muted">Use underscores, no spaces</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Default Value *</label>
+                        <input type="text" class="form-control" @bind="editingConstant.DefaultValue"
+                               placeholder="e.g., 300" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Unit</label>
+                        <input type="text" class="form-control" @bind="editingConstant.Unit"
+                               placeholder="e.g., MPa" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Standard</label>
+                        <input type="text" class="form-control" @bind="editingConstant.Standard"
+                               placeholder="e.g., AS4100" />
+                        <small class="text-muted">e.g., AS4100, AS3600, AS1170.0</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <input type="text" class="form-control" @bind="editingConstant.Category"
+                               placeholder="e.g., Steel, Concrete, Factors" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="2" @bind="editingConstant.Description"
+                                  placeholder="Brief description of this constant"></textarea>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> @errorMessage
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveConstant">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private List<AppConstant>? appConstants;
+    private bool showDialog = false;
+    private AppConstant editingConstant = new();
+    private string? errorMessage;
+    private string searchTerm = "";
+    private string filterStandard = "";
+    private string filterCategory = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadConstants();
+    }
+
+    private async Task LoadConstants()
+    {
+        appConstants = await DbContext.AppConstants
+            .OrderBy(c => c.Standard)
+            .ThenBy(c => c.Category)
+            .ThenBy(c => c.ConstantName)
+            .ToListAsync();
+    }
+
+    private IEnumerable<AppConstant> GetFilteredConstants()
+    {
+        if (appConstants == null) return Enumerable.Empty<AppConstant>();
+
+        var filtered = appConstants.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            filtered = filtered.Where(c =>
+                (c.ConstantName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (c.Description?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filterStandard))
+        {
+            filtered = filtered.Where(c => c.Standard == filterStandard);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filterCategory))
+        {
+            filtered = filtered.Where(c => c.Category == filterCategory);
+        }
+
+        return filtered;
+    }
+
+    private void ShowCreateDialog()
+    {
+        editingConstant = new AppConstant();
+        errorMessage = null;
+        showDialog = true;
+    }
+
+    private void ShowEditDialog(AppConstant constant)
+    {
+        editingConstant = new AppConstant
+        {
+            AppConstantId = constant.AppConstantId,
+            ConstantName = constant.ConstantName,
+            DefaultValue = constant.DefaultValue,
+            Unit = constant.Unit,
+            Standard = constant.Standard,
+            Category = constant.Category,
+            Description = constant.Description,
+            CreatedDate = constant.CreatedDate
+        };
+        errorMessage = null;
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        editingConstant = new();
+        errorMessage = null;
+    }
+
+    private async Task SaveConstant()
+    {
+        errorMessage = null;
+
+        // Validation
+        if (string.IsNullOrWhiteSpace(editingConstant.ConstantName))
+        {
+            errorMessage = "Constant name is required";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editingConstant.DefaultValue))
+        {
+            errorMessage = "Default value is required";
+            return;
+        }
+
+        try
+        {
+            if (editingConstant.AppConstantId > 0)
+            {
+                // Update existing
+                var existing = await DbContext.AppConstants.FindAsync(editingConstant.AppConstantId);
+                if (existing != null)
+                {
+                    existing.ConstantName = editingConstant.ConstantName;
+                    existing.DefaultValue = editingConstant.DefaultValue;
+                    existing.Unit = editingConstant.Unit;
+                    existing.Standard = editingConstant.Standard;
+                    existing.Category = editingConstant.Category;
+                    existing.Description = editingConstant.Description;
+                    existing.LastModifiedDate = DateTime.UtcNow;
+                }
+            }
+            else
+            {
+                // Create new
+                DbContext.AppConstants.Add(editingConstant);
+            }
+
+            await DbContext.SaveChangesAsync();
+            await LoadConstants();
+            CloseDialog();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error saving constant: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteConstant(int constantId)
+    {
+        // Check if this constant is referenced by any Card templates
+        var isReferenced = await DbContext.Cards
+            .AnyAsync(c => c.InputVariables.Contains($"\"appConstantId\":{constantId}"));
+
+        if (isReferenced)
+        {
+            // TODO: Show a better warning dialog
+            errorMessage = "Cannot delete - this constant is referenced by one or more card templates";
+            return;
+        }
+
+        var constant = await DbContext.AppConstants.FindAsync(constantId);
+        if (constant != null)
+        {
+            DbContext.AppConstants.Remove(constant);
+            await DbContext.SaveChangesAsync();
+            await LoadConstants();
+        }
+    }
+}

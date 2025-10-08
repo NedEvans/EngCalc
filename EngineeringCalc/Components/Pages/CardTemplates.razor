@@ -1,0 +1,489 @@
+@page "/cards"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Card Templates</PageTitle>
+
+<h1>Card Templates</h1>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Card templates are reusable calculation blocks that can be added to any calculation.
+</div>
+
+<button class="btn btn-primary mb-3" @onclick="ShowCreateDialog">
+    <i class="bi bi-plus-circle"></i> New Card Template
+</button>
+
+@if (cards == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!cards.Any())
+{
+    <div class="alert alert-warning">
+        No card templates found. Click "New Card Template" to create your first engineering calculation template.
+    </div>
+}
+else
+{
+    <div class="row">
+        @foreach (var cardType in cards.GroupBy(c => c.CardType))
+        {
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">@cardType.Key</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group list-group-flush">
+                            @foreach (var card in cardType)
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">@card.CardName</h6>
+                                            <p class="mb-1 text-muted small">@card.Description</p>
+                                            <small class="text-muted">Version @card.CardVersion</small>
+                                        </div>
+                                        <div class="btn-group-vertical btn-group-sm">
+                                            <button class="btn btn-outline-info" @onclick="() => ViewCard(card.CardId)">
+                                                <i class="bi bi-eye"></i> View
+                                            </button>
+                                            <button class="btn btn-outline-warning" @onclick="() => ShowEditDialog(card)">
+                                                <i class="bi bi-pencil"></i> Edit
+                                            </button>
+                                            <button class="btn btn-outline-danger" @onclick="() => DeleteCard(card.CardId)">
+                                                <i class="bi bi-trash"></i> Delete
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (showDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="overflow-y: auto;">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(editingCard?.CardId > 0 ? "Edit Card Template" : "New Card Template")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Card Name *</label>
+                                <input type="text" class="form-control" @bind="editingCard.CardName" placeholder="Bolt Tension Check" />
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label class="form-label">Card Type *</label>
+                                <input type="text" class="form-control" @bind="editingCard.CardType" placeholder="Bolt Design" />
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label class="form-label">Version</label>
+                                <input type="text" class="form-control" @bind="editingCard.CardVersion" placeholder="1.0" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" rows="2" @bind="editingCard.Description" placeholder="Calculates bolt capacity in tension per AS4100"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">C# Code Template * <small class="text-muted">(Must define a Calculate method)</small></label>
+                        <textarea class="form-control font-monospace" rows="10" @bind="editingCard.CodeTemplate"
+                                  placeholder="public double Calculate(double boltDia, double tensileStrength, out double capacity) { ... }"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">MathML Formula <small class="text-muted">(Visual representation)</small></label>
+                        <textarea class="form-control font-monospace" rows="3" @bind="editingCard.MathMLFormula"
+                                  placeholder="<math><mi>N</mi><mo>=</mo><mi>A</mi><mo>×</mo><mi>f</mi></math>"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Input Variables *
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-2" @onclick="ToggleInputMode">
+                                @(showInputBindingUI ? "Switch to JSON Mode" : "Switch to Visual Editor")
+                            </button>
+                        </label>
+
+                        @if (showInputBindingUI && inputVariablesList != null)
+                        {
+                            <div class="border p-3 bg-light">
+                                @foreach (var (variable, index) in inputVariablesList.Select((v, i) => (v, i)))
+                                {
+                                    <div class="card mb-2">
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-3">
+                                                    <label class="form-label small">Variable Name *</label>
+                                                    <input type="text" class="form-control form-control-sm" @bind="variable.Name" placeholder="fy" />
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small">Type</label>
+                                                    <select class="form-select form-select-sm" @bind="variable.Type">
+                                                        <option value="double">double</option>
+                                                        <option value="int">int</option>
+                                                        <option value="string">string</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small">Unit</label>
+                                                    <input type="text" class="form-control form-control-sm" @bind="variable.Unit" placeholder="MPa" />
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="form-label small">Description</label>
+                                                    <input type="text" class="form-control form-control-sm" @bind="variable.Description" placeholder="Yield strength" />
+                                                </div>
+                                                <div class="col-md-1 d-flex align-items-end">
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveInputVariable(index)">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="mt-2">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="bind_@index"
+                                                           checked="@(variable.AppConstantId.HasValue)"
+                                                           @onchange="e => ToggleBinding(index, (bool)e.Value!)" />
+                                                    <label class="form-check-label small" for="bind_@index">
+                                                        Bind to Global Constant
+                                                    </label>
+                                                </div>
+
+                                                @if (variable.AppConstantId.HasValue || variable.ShowBindingDropdown)
+                                                {
+                                                    <div class="mt-2">
+                                                        <select class="form-select form-select-sm" @bind="variable.AppConstantId">
+                                                            <option value="">-- Select Constant --</option>
+                                                            @if (appConstants != null)
+                                                            {
+                                                                @foreach (var ac in appConstants.OrderBy(a => a.Standard).ThenBy(a => a.ConstantName))
+                                                                {
+                                                                    var unitMatch = string.IsNullOrEmpty(variable.Unit) || ac.Unit == variable.Unit;
+                                                                    var optionClass = unitMatch ? "" : "text-warning";
+                                                                    <option value="@ac.AppConstantId" class="@optionClass">
+                                                                        @ac.ConstantName - @ac.Description (@ac.DefaultValue @ac.Unit) [@ac.Standard]
+                                                                    </option>
+                                                                }
+                                                            }
+                                                        </select>
+
+                                                        @if (variable.AppConstantId.HasValue)
+                                                        {
+                                                            var selectedConstant = appConstants?.FirstOrDefault(a => a.AppConstantId == variable.AppConstantId.Value);
+                                                            if (selectedConstant != null && !string.IsNullOrEmpty(variable.Unit) && selectedConstant.Unit != variable.Unit)
+                                                            {
+                                                                <div class="alert alert-warning mt-1 py-1 small">
+                                                                    <i class="bi bi-exclamation-triangle"></i> Unit mismatch: Variable uses "@variable.Unit" but constant uses "@selectedConstant.Unit"
+                                                                </div>
+                                                            }
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddInputVariable">
+                                    <i class="bi bi-plus-circle"></i> Add Input Variable
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <textarea class="form-control font-monospace" rows="5" @bind="editingCard.InputVariables"
+                                      placeholder='[{"name":"boltDia","type":"double","unit":"mm","description":"Bolt diameter"}]'></textarea>
+                        }
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Output Variables * <small class="text-muted">(JSON array)</small></label>
+                        <textarea class="form-control font-monospace" rows="5" @bind="editingCard.OutputVariables"
+                                  placeholder='[{"name":"capacity","type":"double","unit":"kN","description":"Bolt tension capacity"}]'></textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Design Load Variable <small class="text-muted">(for pass/fail check)</small></label>
+                                <input type="text" class="form-control" @bind="editingCard.DesignLoadVariable" placeholder="designLoad" />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Capacity Variable <small class="text-muted">(for pass/fail check)</small></label>
+                                <input type="text" class="form-control" @bind="editingCard.CapacityVariable" placeholder="capacity" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDialog">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveCard">Save Template</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private List<Card>? cards;
+    private List<AppConstant>? appConstants;
+    private bool showDialog = false;
+    private Card editingCard = new();
+    private bool showInputBindingUI = false;
+    private List<InputVariableModel>? inputVariablesList;
+
+    // Helper class for binding UI
+    private class InputVariableModel
+    {
+        public string Name { get; set; } = "";
+        public string Type { get; set; } = "double";
+        public string? Unit { get; set; }
+        public string? Description { get; set; }
+        public int? AppConstantId { get; set; }
+        public bool ShowBindingDropdown { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCards();
+        await LoadAppConstants();
+    }
+
+    private async Task LoadCards()
+    {
+        cards = await DbContext.Cards
+            .OrderBy(c => c.CardType)
+            .ThenBy(c => c.CardName)
+            .ToListAsync();
+    }
+
+    private async Task LoadAppConstants()
+    {
+        appConstants = await DbContext.AppConstants
+            .OrderBy(ac => ac.Standard)
+            .ThenBy(ac => ac.ConstantName)
+            .ToListAsync();
+    }
+
+    private void ShowCreateDialog()
+    {
+        editingCard = new Card
+        {
+            CardVersion = "1.0",
+            InputVariables = "[]",
+            OutputVariables = "[]"
+        };
+        showInputBindingUI = false;
+        inputVariablesList = null;
+        showDialog = true;
+    }
+
+    private void ShowEditDialog(Card card)
+    {
+        editingCard = new Card
+        {
+            CardId = card.CardId,
+            CardName = card.CardName,
+            CardType = card.CardType,
+            CardVersion = card.CardVersion,
+            Description = card.Description,
+            CodeTemplate = card.CodeTemplate,
+            MathMLFormula = card.MathMLFormula,
+            InputVariables = card.InputVariables,
+            OutputVariables = card.OutputVariables,
+            DesignLoadVariable = card.DesignLoadVariable,
+            CapacityVariable = card.CapacityVariable,
+            CreatedDate = card.CreatedDate
+        };
+        showInputBindingUI = false;
+        inputVariablesList = null;
+        showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        editingCard = new();
+        showInputBindingUI = false;
+        inputVariablesList = null;
+    }
+
+    private void ToggleInputMode()
+    {
+        if (showInputBindingUI)
+        {
+            // Switching to JSON mode - serialize the list
+            if (inputVariablesList != null)
+            {
+                var jsonArray = inputVariablesList.Select(v =>
+                {
+                    var obj = new Dictionary<string, object>
+                    {
+                        ["name"] = v.Name,
+                        ["type"] = v.Type
+                    };
+                    if (!string.IsNullOrEmpty(v.Unit)) obj["unit"] = v.Unit;
+                    if (!string.IsNullOrEmpty(v.Description)) obj["description"] = v.Description;
+                    if (v.AppConstantId.HasValue) obj["appConstantId"] = v.AppConstantId.Value;
+                    return obj;
+                }).ToList();
+
+                editingCard.InputVariables = JsonSerializer.Serialize(jsonArray, new JsonSerializerOptions { WriteIndented = true });
+            }
+            showInputBindingUI = false;
+        }
+        else
+        {
+            // Switching to visual mode - parse the JSON
+            try
+            {
+                var inputDoc = JsonDocument.Parse(editingCard.InputVariables);
+                inputVariablesList = inputDoc.RootElement.EnumerateArray().Select(v => new InputVariableModel
+                {
+                    Name = v.GetProperty("name").GetString() ?? "",
+                    Type = v.GetProperty("type").GetString() ?? "double",
+                    Unit = v.TryGetProperty("unit", out var u) ? u.GetString() : null,
+                    Description = v.TryGetProperty("description", out var d) ? d.GetString() : null,
+                    AppConstantId = v.TryGetProperty("appConstantId", out var ac) && ac.ValueKind == JsonValueKind.Number
+                        ? ac.GetInt32() : null,
+                    ShowBindingDropdown = v.TryGetProperty("appConstantId", out var ac2) && ac2.ValueKind == JsonValueKind.Number
+                }).ToList();
+                showInputBindingUI = true;
+            }
+            catch
+            {
+                // If parsing fails, start with empty list
+                inputVariablesList = new List<InputVariableModel>();
+                showInputBindingUI = true;
+            }
+        }
+    }
+
+    private void AddInputVariable()
+    {
+        inputVariablesList ??= new List<InputVariableModel>();
+        inputVariablesList.Add(new InputVariableModel());
+    }
+
+    private void RemoveInputVariable(int index)
+    {
+        if (inputVariablesList != null && index >= 0 && index < inputVariablesList.Count)
+        {
+            inputVariablesList.RemoveAt(index);
+        }
+    }
+
+    private void ToggleBinding(int index, bool isChecked)
+    {
+        if (inputVariablesList != null && index >= 0 && index < inputVariablesList.Count)
+        {
+            var variable = inputVariablesList[index];
+            if (isChecked)
+            {
+                variable.ShowBindingDropdown = true;
+            }
+            else
+            {
+                variable.AppConstantId = null;
+                variable.ShowBindingDropdown = false;
+            }
+        }
+    }
+
+    private async Task SaveCard()
+    {
+        if (string.IsNullOrWhiteSpace(editingCard.CardName) ||
+            string.IsNullOrWhiteSpace(editingCard.CardType) ||
+            string.IsNullOrWhiteSpace(editingCard.CodeTemplate))
+        {
+            return;
+        }
+
+        // If in visual mode, serialize the input variables list
+        if (showInputBindingUI && inputVariablesList != null)
+        {
+            var jsonArray = inputVariablesList.Select(v =>
+            {
+                var obj = new Dictionary<string, object>
+                {
+                    ["name"] = v.Name,
+                    ["type"] = v.Type
+                };
+                if (!string.IsNullOrEmpty(v.Unit)) obj["unit"] = v.Unit;
+                if (!string.IsNullOrEmpty(v.Description)) obj["description"] = v.Description;
+                if (v.AppConstantId.HasValue) obj["appConstantId"] = v.AppConstantId.Value;
+                return obj;
+            }).ToList();
+
+            editingCard.InputVariables = JsonSerializer.Serialize(jsonArray);
+        }
+
+        if (editingCard.CardId > 0)
+        {
+            var existing = await DbContext.Cards.FindAsync(editingCard.CardId);
+            if (existing != null)
+            {
+                existing.CardName = editingCard.CardName;
+                existing.CardType = editingCard.CardType;
+                existing.CardVersion = editingCard.CardVersion;
+                existing.Description = editingCard.Description;
+                existing.CodeTemplate = editingCard.CodeTemplate;
+                existing.MathMLFormula = editingCard.MathMLFormula;
+                existing.InputVariables = editingCard.InputVariables;
+                existing.OutputVariables = editingCard.OutputVariables;
+                existing.DesignLoadVariable = editingCard.DesignLoadVariable;
+                existing.CapacityVariable = editingCard.CapacityVariable;
+                existing.LastModifiedDate = DateTime.UtcNow;
+            }
+        }
+        else
+        {
+            DbContext.Cards.Add(editingCard);
+        }
+
+        await DbContext.SaveChangesAsync();
+        await LoadCards();
+        CloseDialog();
+    }
+
+    private async Task DeleteCard(int cardId)
+    {
+        var card = await DbContext.Cards.FindAsync(cardId);
+        if (card != null)
+        {
+            DbContext.Cards.Remove(card);
+            await DbContext.SaveChangesAsync();
+            await LoadCards();
+        }
+    }
+
+    private void ViewCard(int cardId)
+    {
+        NavigationManager.NavigateTo($"/cards/{cardId}");
+    }
+}

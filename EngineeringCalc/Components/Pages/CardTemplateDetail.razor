@@ -1,0 +1,259 @@
+@page "/cards/{CardId:int}"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>@card?.CardName</PageTitle>
+
+@if (card != null)
+{
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/cards">Card Templates</a></li>
+            <li class="breadcrumb-item active">@card.CardName</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>@card.CardName</h1>
+        <div>
+            <button class="btn btn-warning" @onclick="EditCard">
+                <i class="bi bi-pencil"></i> Edit
+            </button>
+            <a href="/cards" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Template Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-2">
+                        <strong>Card Type:</strong> @card.CardType
+                    </div>
+                    <div class="mb-2">
+                        <strong>Version:</strong> @card.CardVersion
+                    </div>
+                    <div class="mb-2">
+                        <strong>Description:</strong> @card.Description
+                    </div>
+                    <div class="mb-2">
+                        <strong>Created:</strong> @card.CreatedDate.ToString("yyyy-MM-dd")
+                    </div>
+                    <div class="mb-2">
+                        <strong>Last Modified:</strong> @card.LastModifiedDate.ToString("yyyy-MM-dd")
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Input Variables</h5>
+                </div>
+                <div class="card-body">
+                    @if (inputVariables != null && inputVariables.Any())
+                    {
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Unit</th>
+                                    <th>Global Constant</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var variable in inputVariables)
+                                {
+                                    var name = variable.GetProperty("name").GetString();
+                                    var type = variable.GetProperty("type").GetString();
+                                    var unit = variable.TryGetProperty("unit", out var u) ? u.GetString() : "";
+                                    var desc = variable.TryGetProperty("description", out var d) ? d.GetString() : "";
+
+                                    // Check if bound to AppConstant
+                                    string? boundConstantName = null;
+                                    if (variable.TryGetProperty("appConstantId", out var appConstIdProp) &&
+                                        appConstIdProp.ValueKind == JsonValueKind.Number)
+                                    {
+                                        var appConstantId = appConstIdProp.GetInt32();
+                                        var appConstant = appConstants?.FirstOrDefault(ac => ac.AppConstantId == appConstantId);
+                                        if (appConstant != null)
+                                        {
+                                            boundConstantName = $"{appConstant.ConstantName} ({appConstant.DefaultValue} {appConstant.Unit})";
+                                        }
+                                    }
+
+                                    <tr>
+                                        <td><code>@name</code></td>
+                                        <td>@type</td>
+                                        <td>@unit</td>
+                                        <td>
+                                            @if (boundConstantName != null)
+                                            {
+                                                <span class="badge bg-info">
+                                                    <i class="bi bi-link-45deg"></i> @boundConstantName
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td>@desc</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Output Variables</h5>
+                </div>
+                <div class="card-body">
+                    @if (outputVariables != null && outputVariables.Any())
+                    {
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Unit</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var variable in outputVariables)
+                                {
+                                    var name = variable.GetProperty("name").GetString();
+                                    var type = variable.GetProperty("type").GetString();
+                                    var unit = variable.TryGetProperty("unit", out var u) ? u.GetString() : "";
+                                    var desc = variable.TryGetProperty("description", out var d) ? d.GetString() : "";
+
+                                    <tr>
+                                        <td><code>@name</code></td>
+                                        <td>@type</td>
+                                        <td>@unit</td>
+                                        <td>@desc</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(card.DesignLoadVariable) || !string.IsNullOrEmpty(card.CapacityVariable))
+            {
+                <div class="card mb-3">
+                    <div class="card-header bg-warning">
+                        <h5 class="mb-0">Pass/Fail Check</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <strong>Design Load Variable:</strong> <code>@card.DesignLoadVariable</code>
+                        </div>
+                        <div class="mb-2">
+                            <strong>Capacity Variable:</strong> <code>@card.CapacityVariable</code>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="col-md-6">
+            @if (!string.IsNullOrEmpty(card.MathMLFormula))
+            {
+                <div class="card mb-3">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Formula (MathML)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="border p-2 bg-light text-center">
+                            @((MarkupString)card.MathMLFormula)
+                        </div>
+                        <details class="mt-3">
+                            <summary class="text-muted">Show MathML Source</summary>
+                            <pre class="mt-2 small">@card.MathMLFormula</pre>
+                        </details>
+                    </div>
+                </div>
+            }
+
+            <div class="card mb-3">
+                <div class="card-header bg-dark text-white">
+                    <h5 class="mb-0">C# Code Template</h5>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-light p-3"><code>@card.CodeTemplate</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <p><em>Loading...</em></p>
+}
+
+@code {
+    [Parameter]
+    public int CardId { get; set; }
+
+    private Card? card;
+    private JsonElement[]? inputVariables;
+    private JsonElement[]? outputVariables;
+    private List<AppConstant>? appConstants;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCard();
+        await LoadAppConstants();
+    }
+
+    private async Task LoadCard()
+    {
+        card = await DbContext.Cards.FindAsync(CardId);
+
+        if (card != null)
+        {
+            try
+            {
+                // Parse input variables
+                var inputDoc = JsonDocument.Parse(card.InputVariables);
+                inputVariables = inputDoc.RootElement.EnumerateArray().ToArray();
+
+                // Parse output variables
+                var outputDoc = JsonDocument.Parse(card.OutputVariables);
+                outputVariables = outputDoc.RootElement.EnumerateArray().ToArray();
+            }
+            catch
+            {
+                // Ignore parsing errors for now
+            }
+        }
+    }
+
+    private async Task LoadAppConstants()
+    {
+        appConstants = await DbContext.AppConstants.ToListAsync();
+    }
+
+    private void EditCard()
+    {
+        NavigationManager.NavigateTo("/cards");
+        // TODO: Open edit dialog - for now just navigate back to list
+    }
+}

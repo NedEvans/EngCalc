@@ -30,5 +30,5 @@ public class Job
     public Project Project { get; set; } = null!;
 
     public ICollection<Calculation> Calculations { get; set; } = new List<Calculation>();
-    public ICollection<GlobalVariable> GlobalVariables { get; set; } = new List<GlobalVariable>();
+    public ICollection<GlobalConstant> GlobalConstants { get; set; } = new List<GlobalConstant>();
 }

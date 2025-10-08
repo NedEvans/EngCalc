@@ -1,0 +1,401 @@
+@page "/calculations/{CalculationId:int}"
+@using EngineeringCalc.Models
+@using EngineeringCalc.Data
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject ApplicationDbContext DbContext
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>@calculation?.CalculationTitle</PageTitle>
+
+@if (calculation != null && job != null)
+{
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/projects">Projects</a></li>
+            <li class="breadcrumb-item"><a href="/projects/@job.ProjectId/jobs">@project?.ProjectName</a></li>
+            <li class="breadcrumb-item"><a href="/jobs/@job.JobId/calculations">@job.JobName</a></li>
+            <li class="breadcrumb-item active">@calculation.CalculationTitle</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>@calculation.CalculationTitle</h1>
+        <span class="badge bg-@GetStatusColor(calculation.Status) fs-6">@calculation.Status</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(calculation.Description))
+    {
+        <p class="lead">@calculation.Description</p>
+    }
+
+    <div class="mb-4">
+        <strong>Revision:</strong> @currentRevision?.RevisionNumber |
+        <strong>Created:</strong> @calculation.CreatedDate.ToString("yyyy-MM-dd")
+    </div>
+
+    <h3>Calculation Cards</h3>
+
+    <div class="mb-3">
+        <button class="btn btn-secondary me-2" @onclick="NavigateBack">
+            <i class="bi bi-arrow-left"></i> Back to Calculations
+        </button>
+        <button class="btn btn-primary" @onclick="ShowAddCardDialog">
+            <i class="bi bi-plus-circle"></i> Add Card
+        </button>
+    </div>
+
+    @if (cardInstances == null)
+    {
+        <p><em>Loading...</em></p>
+    }
+    else if (!cardInstances.Any())
+    {
+        <div class="alert alert-info">
+            No cards added yet. Click "Add Card" to start building your calculation.
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            @foreach (var instance in cardInstances.OrderBy(c => c.DisplayOrder))
+            {
+                <div class="col-md-6 col-lg-4 mb-3">
+                    <div class="card h-100 @GetCardBorderClass(instance.CheckResult)">
+                        <div class="card-header d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <h6 class="mb-0">@instance.Card.CardName</h6>
+                                <small class="text-muted">@instance.Card.CardType</small>
+                            </div>
+                            @if (!string.IsNullOrEmpty(instance.CheckResult))
+                            {
+                                <span class="badge bg-@GetCheckResultColor(instance.CheckResult)">@instance.CheckResult</span>
+                            }
+                        </div>
+                        <div class="card-body p-2">
+                            @if (!string.IsNullOrEmpty(instance.Card.MathMLFormula))
+                            {
+                                <div class="border p-2 bg-light mb-2 text-center" style="min-height: 60px; display: flex; align-items: center; justify-content: center;">
+                                    @((MarkupString)instance.Card.MathMLFormula)
+                                </div>
+                            }
+
+                            @if (instance.DesignLoad.HasValue && instance.CalculatedCapacity.HasValue)
+                            {
+                                var utilization = instance.DesignLoad.Value / instance.CalculatedCapacity.Value * 100;
+                                var designLoadUnit = GetDesignLoadUnit(instance.Card);
+
+                                <div class="small">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><strong>Design Load:</strong></span>
+                                        <span>@instance.DesignLoad.Value.ToString("F2") @designLoadUnit</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span><strong>Utilization:</strong></span>
+                                        <span class="text-@GetUtilizationColor(utilization)">
+                                            <strong>@utilization.ToString("F1")%</strong>
+                                        </span>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="text-muted small text-center">
+                                    <em>Not calculated</em>
+                                </div>
+                            }
+                        </div>
+                        <div class="card-footer p-2 d-flex justify-content-between">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => EditCardInstance(instance.CardInstanceId)">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCardInstance(instance.CardInstanceId)">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (showAddCardDialog)
+{
+    <div class="modal fade show d-block" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Card to Calculation</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAddCardDialog"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted mb-3"><i class="bi bi-info-circle"></i> Click on a card below to add it to your calculation</p>
+                    @if (availableCards == null)
+                    {
+                        <p><em>Loading cards...</em></p>
+                    }
+                    else if (!availableCards.Any())
+                    {
+                        <div class="alert alert-warning">
+                            No card templates available. <a href="/cards">Create a card template</a> first.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group">
+                            @foreach (var cardType in availableCards.GroupBy(c => c.CardType))
+                            {
+                                <div class="list-group-item bg-light">
+                                    <strong>@cardType.Key</strong>
+                                </div>
+                                @foreach (var card in cardType)
+                                {
+                                    <button class="list-group-item list-group-item-action" @onclick="() => SelectCard(card.CardId)">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="mb-1">
+                                                    <i class="bi bi-plus-circle text-primary"></i>
+                                                    @card.CardName
+                                                </h6>
+                                                <small class="text-muted">@card.Description</small>
+                                            </div>
+                                            <small class="text-muted">v@(card.CardVersion)</small>
+                                        </div>
+                                    </button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAddCardDialog">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public int CalculationId { get; set; }
+
+    private Calculation? calculation;
+    private Job? job;
+    private Project? project;
+    private CalculationRevision? currentRevision;
+    private List<CardInstance>? cardInstances;
+    private List<Card>? availableCards;
+    private bool showAddCardDialog = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCalculation();
+        await LoadCardInstances();
+    }
+
+    private async Task LoadCalculation()
+    {
+        calculation = await DbContext.Calculations
+            .Include(c => c.Job)
+                .ThenInclude(j => j.Project)
+            .Include(c => c.CurrentRevision)
+            .FirstOrDefaultAsync(c => c.CalculationId == CalculationId);
+
+        if (calculation != null)
+        {
+            job = calculation.Job;
+            project = job?.Project;
+            currentRevision = calculation.CurrentRevision;
+        }
+    }
+
+    private async Task LoadCardInstances()
+    {
+        if (currentRevision == null) return;
+
+        cardInstances = await DbContext.CardInstances
+            .Include(ci => ci.Card)
+            .Where(ci => ci.CalculationRevisionId == currentRevision.RevisionId)
+            .ToListAsync();
+    }
+
+    private async Task ShowAddCardDialog()
+    {
+        availableCards = await DbContext.Cards.ToListAsync();
+        showAddCardDialog = true;
+    }
+
+    private void CloseAddCardDialog()
+    {
+        showAddCardDialog = false;
+        availableCards = null;
+    }
+
+    private async Task SelectCard(int cardId)
+    {
+        if (currentRevision == null || job == null) return;
+
+        var nextOrder = cardInstances?.Any() == true ? cardInstances.Max(c => c.DisplayOrder) + 1 : 0;
+
+        // Load the card to check for AppConstant bindings
+        var card = await DbContext.Cards.FindAsync(cardId);
+        if (card == null) return;
+
+        var newInstance = new CardInstance
+        {
+            CardId = cardId,
+            CalculationRevisionId = currentRevision.RevisionId,
+            DisplayOrder = nextOrder,
+            LocalVariables = "{}"
+        };
+
+        // Initialize bindings and overrides from Card's InputVariables
+        var bindings = new Dictionary<string, int>();
+        var overrides = new Dictionary<string, bool>();
+
+        try
+        {
+            var inputDoc = JsonDocument.Parse(card.InputVariables);
+            foreach (var variable in inputDoc.RootElement.EnumerateArray())
+            {
+                var varName = variable.GetProperty("name").GetString();
+
+                // Check if this variable has an appConstantId binding
+                if (variable.TryGetProperty("appConstantId", out var appConstIdProp) &&
+                    appConstIdProp.ValueKind == JsonValueKind.Number)
+                {
+                    var appConstantId = appConstIdProp.GetInt32();
+
+                    // Find the corresponding GlobalConstant in this job
+                    var globalConstant = await DbContext.GlobalConstants
+                        .FirstOrDefaultAsync(gc => gc.JobId == job.JobId && gc.AppConstantId == appConstantId);
+
+                    if (globalConstant != null && varName != null)
+                    {
+                        bindings[varName] = globalConstant.GlobalConstantId;
+                        overrides[varName] = false; // Default: use global constant
+                    }
+                }
+            }
+
+            if (bindings.Any())
+            {
+                newInstance.GlobalConstantBindings = JsonSerializer.Serialize(bindings);
+                newInstance.GlobalConstantOverrides = JsonSerializer.Serialize(overrides);
+            }
+        }
+        catch (Exception)
+        {
+            // If parsing fails, continue without bindings
+        }
+
+        DbContext.CardInstances.Add(newInstance);
+        await DbContext.SaveChangesAsync();
+        await LoadCardInstances();
+        CloseAddCardDialog();
+    }
+
+    private void EditCardInstance(int instanceId)
+    {
+        NavigationManager.NavigateTo($"/card-instances/{instanceId}/edit");
+    }
+
+    private async Task DeleteCardInstance(int instanceId)
+    {
+        var instance = await DbContext.CardInstances.FindAsync(instanceId);
+        if (instance != null)
+        {
+            DbContext.CardInstances.Remove(instance);
+            await DbContext.SaveChangesAsync();
+            await LoadCardInstances();
+        }
+    }
+
+    private string GetStatusColor(string status)
+    {
+        return status switch
+        {
+            "Draft" => "secondary",
+            "In Progress" => "info",
+            "Under Review" => "warning",
+            "Approved" => "success",
+            "Rejected" => "danger",
+            _ => "secondary"
+        };
+    }
+
+    private string GetCardBorderClass(string? result)
+    {
+        return result switch
+        {
+            "Pass" => "border-success",
+            "Fail" => "border-danger",
+            "Warning" => "border-warning",
+            _ => ""
+        };
+    }
+
+    private string GetCheckResultColor(string result)
+    {
+        return result switch
+        {
+            "Pass" => "success",
+            "Fail" => "danger",
+            "Warning" => "warning",
+            _ => "secondary"
+        };
+    }
+
+    private string FormatJson(string json)
+    {
+        try
+        {
+            var obj = JsonSerializer.Deserialize<JsonElement>(json);
+            return JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private string GetDesignLoadUnit(Card card)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(card.DesignLoadVariable) || string.IsNullOrEmpty(card.InputVariables))
+                return "";
+
+            var inputDoc = JsonDocument.Parse(card.InputVariables);
+            foreach (var variable in inputDoc.RootElement.EnumerateArray())
+            {
+                var name = variable.GetProperty("name").GetString();
+                if (name == card.DesignLoadVariable && variable.TryGetProperty("unit", out var unit))
+                {
+                    return unit.GetString() ?? "";
+                }
+            }
+        }
+        catch { }
+
+        return "";
+    }
+
+    private string GetUtilizationColor(double utilization)
+    {
+        if (utilization <= 100.0)
+            return "success";
+        else if (utilization <= 110.0)
+            return "warning";
+        else
+            return "danger";
+    }
+
+    private void NavigateBack()
+    {
+        NavigationManager.NavigateTo($"/jobs/{calculation?.JobId}/calculations");
+    }
+}

@@ -56,7 +56,7 @@ else
                             @calc.Status
                         </span>
                     </td>
-                    <td>v@calc.CurrentRevisionId</td>
+                    <td>@(calc.CurrentRevision?.RevisionNumber ?? "N/A")</td>
                     <td>@calc.CreatedDate.ToString("yyyy-MM-dd")</td>
                     <td>
                         <button class="btn btn-sm btn-primary" @onclick="() => ViewCalculation(calc.CalculationId)">
@@ -142,6 +142,7 @@ else
     private async Task LoadCalculations()
     {
         calculations = await DbContext.Calculations
+            .Include(c => c.CurrentRevision)
             .Where(c => c.JobId == JobId)
             .OrderByDescending(c => c.CreatedDate)
             .ToListAsync();
@@ -197,17 +198,24 @@ else
         }
         else
         {
-            // Create initial revision
+            // Create calculation first
+            DbContext.Calculations.Add(editingCalculation);
+            await DbContext.SaveChangesAsync();
+
+            // Then create initial revision
             var revision = new CalculationRevision
             {
-                CalculationId = 0, // Will be set after calculation is saved
+                CalculationId = editingCalculation.CalculationId,
                 RevisionNumber = "Rev1",
                 Comments = "Initial version",
                 CreatedDate = DateTime.UtcNow
             };
 
-            editingCalculation.Revisions.Add(revision);
-            DbContext.Calculations.Add(editingCalculation);
+            DbContext.CalculationRevisions.Add(revision);
+            await DbContext.SaveChangesAsync();
+
+            // Set as current revision
+            editingCalculation.CurrentRevisionId = revision.RevisionId;
         }
 
         await DbContext.SaveChangesAsync();

@@ -1,0 +1,83 @@
+/* MathML Styling */
+.mathml-container {
+    font-family: 'Cambria Math', 'Latin Modern Math', 'DejaVu Math TeX Gyre', serif;
+    font-size: 1.3em;
+    padding: 10px;
+}
+
+.mathml-container math {
+    display: inline-block;
+}
+
+.mathml-container math * {
+    display: inline;
+}
+
+.mathml-container mrow {
+    display: inline;
+}
+
+.mathml-container mi {
+    font-style: italic;
+    display: inline;
+}
+
+.mathml-container mn {
+    font-style: normal;
+    display: inline;
+}
+
+.mathml-container mo {
+    padding: 0 0.2em;
+    display: inline;
+}
+
+.mathml-container msub,
+.mathml-container msup {
+    display: inline;
+    position: relative;
+}
+
+.mathml-container msub > :last-child,
+.mathml-container msup > :last-child {
+    font-size: 0.7em;
+    vertical-align: sub;
+}
+
+.mathml-container msup > :last-child {
+    vertical-align: super;
+}
+
+.mathml-container mfrac {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.mathml-container mfrac > * {
+    text-align: center;
+    display: block;
+}
+
+.mathml-container mfrac > :first-child {
+    border-bottom: 1px solid currentColor;
+    padding-bottom: 0.2em;
+    margin-bottom: 0.2em;
+}
+
+.mathml-container msup > :last-child,
+.mathml-container msub > :last-child {
+    font-size: 0.8em;
+}
+
+.mathml-container msqrt {
+    position: relative;
+    padding-left: 0.5em;
+}
+
+.mathml-container msqrt::before {
+    content: "√";
+    position: absolute;
+    left: 0;
+    top: -0.1em;
+    font-size: 1.2em;
+}

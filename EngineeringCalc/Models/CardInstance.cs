@@ -17,7 +17,16 @@ public class CardInstance
     public int DisplayOrder { get; set; } = 0;
 
     [Required]
-    public string LocalVariables { get; set; } = "{}"; // JSON - actual values
+    public string LocalVariables { get; set; } = "{}"; // JSON - actual values for local overrides
+
+    // Maps variable name to GlobalConstantId for bound variables
+    public string? GlobalConstantBindings { get; set; } // JSON: { "fy": 123, "Es": 124 }
+
+    // Tracks which bound variables are overridden locally (true = use local, false = use global)
+    public string? GlobalConstantOverrides { get; set; } // JSON: { "fy": false, "Es": true }
+
+    // Snapshot of actual input values used in last calculation (for audit trail)
+    public string? InputSnapshot { get; set; } // JSON: { "fy": 350, "Es": 200000, "thickness": 10 }
 
     public string? CalculatedResults { get; set; } // JSON
 
